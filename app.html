@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MeterMind - never sprint back to the car again</title>
+<style>
+  :root { --ink:#1c2b26; --muted:#6b7a73; --accent:#2f6f5e; --accent-dk:#265c4e; --card:#ffffff; --bg:#f4f6f3; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:var(--bg); color:var(--ink); }
+  .wrap { max-width:680px; margin:0 auto; padding:24px 16px 64px; }
+  h1 { font-size:28px; margin:0 0 6px; }
+  .tag { color:var(--muted); margin:0 0 20px; line-height:1.45; }
+  .card { background:var(--card); border:1px solid #e3e8e4; border-radius:14px; padding:18px; margin-bottom:14px; box-shadow:0 1px 3px rgba(0,0,0,.04); }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
+  label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+  input, select { padding:9px 10px; border:1px solid #d4dcd6; border-radius:8px; font-size:15px; background:#fff; }
+  input[type=text] { width:170px; }
+  input[type=number] { width:90px; }
+  button { padding:10px 16px; border:0; border-radius:8px; background:var(--accent); color:#fff; font-size:15px; cursor:pointer; }
+  button:hover { background:var(--accent-dk); }
+  button.ghost { background:#eef1ee; color:var(--ink); }
+  button.ghost:hover { background:#e2e7e2; }
+  .hero { text-align:center; padding:10px 0 4px; }
+  .big { font-size:44px; font-weight:700; margin:6px 0; }
+  .pill { display:inline-block; padding:4px 14px; border-radius:999px; font-size:13px; font-weight:700; }
+  .pill.ok { background:#e2f0e6; color:#2f6f45; }
+  .pill.soon { background:#f6ecd2; color:#8a6a14; }
+  .pill.late { background:#f6e0dd; color:#8f3a33; }
+  .pill.expired { background:#f6e0dd; color:#8f3a33; }
+  .sub { color:var(--muted); font-size:14px; line-height:1.6; }
+  .stats { display:flex; gap:28px; justify-content:center; margin-top:14px; flex-wrap:wrap; }
+  .stat b { display:block; font-size:20px; }
+  .stat span { color:var(--muted); font-size:13px; }
+  .spot { margin-top:14px; padding:10px 14px; background:#f8faf8; border-radius:10px; font-size:15px; }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>MeterMind</h1>
+  <p class="tag">The ticket never comes from the meeting that ran long - it comes from the 8-minute walk you forgot about. MeterMind counts down to the moment you need to start walking, not the moment the meter dies.</p>
+
+  <div class="card" id="setupCard">
+    <div class="row">
+      <div><label for="paid">Paid for</label>
+        <select id="paid">
+          <option value="30">30 minutes</option>
+          <option value="60" selected>1 hour</option>
+          <option value="90">1.5 hours</option>
+          <option value="120">2 hours</option>
+          <option value="180">3 hours</option>
+          <option value="240">4 hours</option>
+        </select></div>
+      <div><label for="walk">Walk back (min)</label><input type="number" id="walk" min="1" max="60" value="8"></div>
+      <div><label for="spot">Spot note</label><input type="text" id="spot" placeholder="Level B2, row 4"></div>
+      <button id="startBtn">Park it</button>
+    </div>
+  </div>
+
+  <div class="card hidden" id="trackCard">
+    <div class="hero">
+      <span class="pill" id="pill"></span>
+      <div class="big" id="bigCount"></div>
+      <div class="sub" id="headline"></div>
+      <div class="stats">
+        <div class="stat"><b id="endClock">-</b><span>meter ends</span></div>
+        <div class="stat"><b id="leaveClock">-</b><span>leave by</span></div>
+        <div class="stat"><b id="leftToLeave">-</b><span>until leave-by</span></div>
+      </div>
+      <div class="spot hidden" id="spotLine"></div>
+      <div style="margin-top:16px">
+        <button class="ghost" id="extendBtn">Add 30 min</button>
+        <button class="ghost" id="doneBtn">Back at the car</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="engine.js"></script>
+<script>
+(function(){
+  var E = MeterMindEngine;
+  var state = null;
+  try { state = JSON.parse(localStorage.getItem('metermind') || 'null'); } catch(e){}
+  var $ = function(id){ return document.getElementById(id); };
+  function save(){ localStorage.setItem('metermind', JSON.stringify(state)); }
+
+  function render(){
+    if (!state){
+      $('setupCard').classList.remove('hidden');
+      $('trackCard').classList.add('hidden');
+      return;
+    }
+    $('setupCard').classList.add('hidden');
+    $('trackCard').classList.remove('hidden');
+    var now = Date.now();
+    var end = state.endMs;
+    var lb = E.leaveByMs(end, state.walkMin);
+    var st = E.status(now, end, state.walkMin);
+    var pill = $('pill');
+    pill.textContent = st === 'ok' ? 'parked' : st === 'soon' ? 'leave soon' : st === 'late' ? 'walk back now' : 'expired';
+    pill.className = 'pill ' + st;
+    $('bigCount').textContent = st === 'expired' ? '0:00' : E.fmtCountdown(now, end);
+    $('headline').textContent = E.headline(now, end, state.walkMin);
+    $('endClock').textContent = E.fmtClock(end);
+    $('leaveClock').textContent = E.fmtClock(lb);
+    $('leftToLeave').textContent = E.fmtCountdown(now, lb);
+    if (state.spot){
+      $('spotLine').classList.remove('hidden');
+      $('spotLine').textContent = 'Parked at: ' + state.spot;
+    } else $('spotLine').classList.add('hidden');
+  }
+
+  $('startBtn').addEventListener('click', function(){
+    var paid = parseInt($('paid').value, 10);
+    var walk = parseInt($('walk').value, 10);
+    if (isNaN(walk) || walk < 1) walk = 8;
+    state = { endMs: E.meterEndMs(Date.now(), paid), walkMin: walk, spot: $('spot').value.trim() };
+    save(); render();
+  });
+  $('extendBtn').addEventListener('click', function(){
+    if (!state) return;
+    state.endMs += 30 * 60000;
+    save(); render();
+  });
+  $('doneBtn').addEventListener('click', function(){
+    state = null;
+    localStorage.removeItem('metermind');
+    render();
+  });
+
+  render();
+  setInterval(render, 20000);
+})();
+</script>
+</body>
+</html>
